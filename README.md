@@ -1,50 +1,141 @@
-## **Description:**
+# GestureCanvas — Lienzo manipulable con gestos simultáneos
 
-This UIKit Mini Project shows how to create a gesture-based drawing canvas. This app mimics the fluid user experience found in professional creative apps by supporting zoom, pan, rotate, and reset gestures, all smoothly applied on a custom grid canvas.
+GestureCanvas es una app de iOS con un lienzo de cuadrícula que se puede acercar,
+rotar y desplazar con los dedos, con los tres gestos funcionando a la vez. Un doble
+toque devuelve el lienzo a su posición inicial con una animación. Toda la
+manipulación se resuelve como un único `CGAffineTransform` sobre la vista del lienzo.
+Existe como proyecto de portafolio para mostrar cómo se combinan varios
+`UIGestureRecognizer` sin que se estorben y cómo se componen transformaciones
+ancladas a un punto, con esa lógica separada en un tipo de valor y cubierta por
+pruebas.
 
-In drawing and design applications, users expect to be able to interact with the canvas using natural gestures without losing an ounce of control and precision. This project explores how to do that:
+---
 
-- Implement simultaneous multitouch gestures without interference.
-- Apply clean and composable transformations using `CGAffineTransform`.
-- Provide visual feedback using a grid-based canvas drawn with Core Graphics.
+## Tecnologías usadas
 
-## Project Structure
+- Swift 6 (con verificación estricta de concurrencia activada)
+- UIKit, construido por código (sin Storyboards)
+- `UIGestureRecognizer` (pinch, rotación, pan, tap) con un delegate para
+  reconocimiento simultáneo
+- Core Graphics para la cuadrícula y `CGAffineTransform` para la manipulación
+- Swift Testing para las pruebas
+- Integración continua con GitHub Actions (compila y corre los tests en cada push/PR)
+- Cero dependencias externas
 
-- `CanvasView.swift` :Custom UIView that draws a grid background using Core Graphics.
-- `ViewController.swift` : Sets up and manages gesture recognizers for the canvas.
-- `Main.storyboard` : Not used — all UI is created programmatically.
+---
 
-## How It Works
+## Cómo está organizado el proyecto
 
-The app supports the following gestures on the canvas view:
+```
+GestureCanvas/
+├── AppDelegate.swift / SceneDelegate.swift   # Arranque; SceneDelegate crea el ViewController
+├── Controllers/
+│   └── ViewController.swift                  # Configura los gestos y traduce cada uno a CanvasTransform
+├── Views/
+│   └── CanvasView.swift                      # UIView que dibuja la cuadrícula con Core Graphics
+└── Canvas/
+    └── CanvasTransform.swift                 # Composición pura del CGAffineTransform (pan, zoom, rotación, reset)
+```
 
-| Gesture | Description | Recognizer Used |
-| --- | --- | --- |
-| Pinch to Zoom | Scale the canvas in/out using two fingers | `UIPinchGestureRecognizer` |
-| Two-Finger Rotation | Rotate the canvas naturally with two fingers | `UIRotationGestureRecognizer` |
-| Two-Finger Pan | Drag the canvas to move around | `UIPanGestureRecognizer` |
-| Double Tap to Reset | Instantly reset all transformations | `UITapGestureRecognizer` |
-- All transformations are applied to the canvas using a single `CGAffineTransform`.
-- Gesture states are updated incrementally to ensure smooth, real-time interaction.
-- The background grid helps visualize how transformations affect the canvas.
+`CanvasTransform` no importa UIKit: son operaciones puras sobre `CGAffineTransform`.
+El `ViewController` solo traduce cada gesto a una llamada (`pan`, `zoom`, `rotate`,
+`reset`) y asigna el resultado a `canvas.transform`.
 
-## Preview
+---
 
-- Pinch to zoom
-- Rotate with two fingers
-- Pan using two fingers
-- Double-tap to reset canvas
+## Cómo funciona / flujo principal
 
-## Ideas for Extension
+1. `SceneDelegate` crea el `ViewController`, que añade una `CanvasView` a pantalla
+   completa.
+2. El `ViewController` registra en la `CanvasView` un `UIPinchGestureRecognizer`, un
+   `UIRotationGestureRecognizer`, un `UIPanGestureRecognizer` de dos dedos y un
+   `UITapGestureRecognizer` de doble toque. Los tres primeros comparten un delegate
+   que devuelve `true` en `shouldRecognizeSimultaneouslyWith`, así que UIKit los deja
+   actuar juntos.
+3. En cada callback de gesto, el `ViewController` lee el incremento (escala, ángulo o
+   traslación desde el último callback), lo aplica a `CanvasTransform` y resetea ese
+   incremento en el recognizer.
+4. `CanvasTransform` concatena cada cambio *después* del transform acumulado:
+   - **pan**: suma la traslación en coordenadas de pantalla, sin que la deformen el
+     zoom o la rotación previos;
+   - **zoom** y **rotación**: se anclan al punto que indica el gesto (el punto medio
+     entre los dedos), llevándolo al origen, aplicando la operación y devolviéndolo a
+     su sitio, de modo que ese punto queda fijo bajo el dedo;
+   - el zoom limita la escala resultante al rango `0.5x ... 4x`.
+5. El doble toque llama a `reset()` dentro de un bloque `UIView.animate`, así que el
+   lienzo vuelve a la identidad con una transición.
 
-Here are some ideas to expand the functionality:
+---
 
-- Add Apple Pencil support to draw lines or shapes.
-- Display current scale and rotation values as overlays.
-- Add an on-screen button to reset the canvas (for accessibility).
-- Allow changing the grid color, spacing, or type (dot grid, isometric, etc.).
-- Save and restore canvas state between sessions.
+## Funcionalidades / qué demuestra
 
-## License
+- Pinch, rotación y pan de dos dedos reconocidos de forma simultánea con un solo
+  `UIGestureRecognizerDelegate`.
+- Composición de `CGAffineTransform` en el orden correcto: traslación en espacio de
+  pantalla, y zoom/rotación anclados a un punto arbitrario.
+- Clamping de la escala a un rango, calculado a partir de la escala actual del
+  transform.
+- Reset animado al estado inicial.
+- La lógica de transformación aislada de UIKit y cubierta por pruebas (punto fijo del
+  anclaje, límites de zoom, independencia del pan respecto al zoom/rotación).
 
-MIT License. Feel free to use and modify.
+---
+
+## Pruebas
+
+`GestureCanvasTests` (Swift Testing) cubre `CanvasTransform`:
+
+- **Estado inicial**: un transform nuevo es la identidad, con escala 1.
+- **Pan**: suma la traslación a `tx`/`ty` en espacio de pantalla; tras aplicar zoom y
+  rotación, un pan sigue sumando exactamente esa traslación y no toca el resto de la
+  matriz.
+- **Zoom**: multiplica la escala actual; el punto de anclaje queda fijo bajo el
+  transform; la escala se limita al máximo y al mínimo, incluso acumulando varios
+  gestos; un factor de zoom menor o igual a 0 se ignora.
+- **Rotación**: no cambia la escala; el punto de anclaje queda fijo; zoom y rotación
+  sobre el mismo punto lo mantienen fijo entre ambos.
+- **Reset**: vuelve a la identidad.
+
+Correr los tests:
+
+```bash
+xcodebuild test \
+  -project GestureCanvas.xcodeproj \
+  -scheme GestureCanvas \
+  -destination 'platform=iOS Simulator,name=iPhone 16'
+```
+
+---
+
+## Cómo correr el proyecto
+
+1. Clona el repo:
+   ```bash
+   git clone https://github.com/iostephano/GestureCanvas.git
+   ```
+2. Abre `GestureCanvas.xcodeproj` con **Xcode 26** (ver `.xcode-version`).
+3. El objetivo mínimo es **iOS 26**. Elige un simulador de iPhone o un dispositivo y
+   ejecuta (Cmd-R).
+4. Usa dos dedos para hacer pinch, rotar y arrastrar el lienzo (se pueden combinar).
+   Doble toque para resetear.
+
+---
+
+## Cosas pendientes o limitadas (a propósito)
+
+- **La cuadrícula no se redibuja al transformar.** Se dibuja una vez a resolución
+  base y luego se escala como bitmap, así que con mucho zoom las líneas se ven
+  pixeladas. Redibujarla en cada frame según el transform inverso queda fuera del
+  alcance del demo.
+- **No hay dibujo.** El lienzo solo se manipula; no se pintan trazos ni figuras.
+- **El pan necesita dos dedos**, para no competir con un gesto de un dedo si más
+  adelante se añadiera dibujo.
+- **Sin inercia ni rebote**: al soltar, el lienzo se queda donde está; no hay
+  desaceleración ni límites de desplazamiento (solo se limita el zoom).
+- **Sin indicadores en pantalla** de la escala o el ángulo actuales.
+
+---
+
+## Autor
+
+Stephano Portella
