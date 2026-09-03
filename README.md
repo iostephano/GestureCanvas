@@ -9,6 +9,8 @@ Existe como proyecto de portafolio para mostrar cómo se combinan varios
 ancladas a un punto, con esa lógica separada en un tipo de valor y cubierta por
 pruebas.
 
+<img width="1792" height="1260" alt="GestureCanvas" src="https://github.com/user-attachments/assets/498074fe-0a3d-430b-a380-e543c93468b8" />
+
 ---
 
 ## Tecnologías usadas
